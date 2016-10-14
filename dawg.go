@@ -19,7 +19,7 @@ type DAWG struct {
 }
 
 type letter struct {
-	char  rune // Yay ! Unicode !
+	char int // Yay ! Unicode !
 	state *state
 
 	// Tree, allow for O(log(n)) search operations
@@ -43,7 +43,7 @@ type state struct {
 
 // Linked list of words
 type word struct {
-	content  string
+	content  []int
 	nextWord *word
 }
 
@@ -122,7 +122,7 @@ func CreateDAWGFromFile(fileName string) (dawg *DAWG, err error) {
 }
 
 // Create a new DAWG by loading the words from an array.
-func CreateDAWG(words []string) *DAWG {
+func CreateDAWG(words [][]int) *DAWG {
 	initialState := &state{final: false}
 	var nbNodes uint64 = 1
 	maxWordSize := 0
@@ -200,7 +200,7 @@ func analyseSubTrie(curState *state, levels []*state, channels []chan int) (subL
 }
 
 // Add a new word to the Trie
-func addWord(initialState *state, word string) (newEndState bool, wordSize int, createdNodes uint64) {
+func addWord(initialState *state, word []int) (newEndState bool, wordSize int, createdNodes uint64) {
 	curState := initialState
 	for _, l := range word {
 		var curLetter *letter
@@ -245,8 +245,8 @@ func addWord(initialState *state, word string) (newEndState bool, wordSize int, 
 // levenshteinDistance is the maximum Levenshtein distance allowed beetween word and the words found in the DAWG.
 // maxResults allow to limit the number of returned results (to reduce the time needed by the search)
 // allowAdd and allowDelete specify if the returned words can have insertions/deletions of letters
-func (dawg *DAWG) Search(word string, levenshteinDistance int, maxResults int, allowAdd bool, allowDelete bool) (words []string, err error) {
-	wordsFound, _, wordsSize, err := searchSubString(dawg.initialState, *bytes.NewBufferString(""), *bytes.NewBufferString(word), levenshteinDistance, maxResults, allowAdd, allowDelete, 0)
+func (dawg *DAWG) Search(word []int, levenshteinDistance int, maxResults int, allowAdd bool, allowDelete bool) (words [][]int, err error) {
+	wordsFound, _, wordsSize, err := searchSubString(dawg.initialState, new(Buffer), *bytes.NewBuffer(word), levenshteinDistance, maxResults, allowAdd, allowDelete, -1)
 	if err != nil {
 		return
 	}
@@ -255,7 +255,7 @@ func (dawg *DAWG) Search(word string, levenshteinDistance int, maxResults int, a
 		wordsFound = wordsFound.nextWord
 	}
 	// Transform to an array of strings
-	words = make([]string, wordsSize)
+	words = make([][]int, wordsSize)
 	for ; wordsSize > 0; wordsSize-- {
 		words[wordsSize-1] = wordsFound.content
 		wordsFound = wordsFound.nextWord
@@ -317,7 +317,7 @@ func LoadDAWGFromFile(fileName string) (dawg *DAWG, err error) {
 
 		states[nodeNumber] = &state{final: finalNode}
 		initialState = states[nodeNumber]
-		var char rune = 0
+		var char int = 0
 		for i, str := range fields[2:] {
 			if i%2 == 0 {
 				// It seems that char, _, _, err = strconv.UnquoteChar(str, 0) doesn't work, so we have to use Unquote before UnquoteChar
@@ -326,7 +326,7 @@ func LoadDAWGFromFile(fileName string) (dawg *DAWG, err error) {
 				if err != nil {
 					return
 				}
-				char, _, _, err = strconv.UnquoteChar(unquoted, 0)
+				char, err = strconv.Atoi(unquoted)
 				if err != nil {
 					return
 				}
@@ -414,7 +414,7 @@ func saveSubTrieToFile(file *os.File, curState *state, nodeNumber *uint64) (err 
 			if _, err = file.WriteString(" "); err != nil {
 				return
 			}
-			if _, err = file.WriteString(strconv.QuoteRune(curLetter.char)); err != nil {
+			if _, err = file.WriteString(strconv.Quote(strconv.Itoa(curLetter.char))); err != nil {
 				return
 			}
 			if _, err = file.WriteString(" "); err != nil {
@@ -431,49 +431,16 @@ func saveSubTrieToFile(file *os.File, curState *state, nodeNumber *uint64) (err 
 	return
 }
 
-func (dawg *DAWG) FindRandomWord(wordSize int) (string, error) {
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	// FIXME : infinite loop if no word of size wordSize
-	// FIXME : highly inefficient
-	INFINITE: for {
-		word := new(bytes.Buffer)
-		state := dawg.initialState
-		for i := 0; i < wordSize; i++ {
-			if state.lettersCount == 0 { // That's bad
-				continue INFINITE
-			}
-			var numLetter int
-			if state.lettersCount == 1 {
-				numLetter = 0
-			} else {
-				numLetter = r.Intn(state.lettersCount)
-			}
-			letter := state.letters
-			for j := 0; j < numLetter; j++ {
-				letter = letter.next
-			}
-			_, err := word.WriteRune(letter.char)
-			if err != nil {
-				return "", err
-			}
-			state = letter.state
-		}
-		if state.final {
-			return word.String(), nil
-		}
-	}
-}
-
-func searchSubString(state *state, start bytes.Buffer, end bytes.Buffer, levenshteinDistance int, maxResults int, allowAdd bool, allowDelete bool, ignoreChar rune) (words *word, lastWord *word, wordsSize int, er error) {
-	var char rune
+func searchSubString(state *state, start bytes.Buffer, end bytes.Buffer, levenshteinDistance int, maxResults int, allowAdd bool, allowDelete bool, ignoreChar int) (words *word, lastWord *word, wordsSize int, er error) {
+	var char int
 	if end.Len() > 0 {
-		char, _, er = end.ReadRune()
+		char, er = end.ReadSlice()
 		if er != nil {
 			return
 		}
 		if char != ignoreChar {
 			if letter := state.getletter(char); letter != nil {
-				runeLen, err := start.WriteRune(letter.char)
+				runeLen, err := start.Write(letter.char)
 				if err != nil {
 					return nil, nil, 0, err
 				}
@@ -523,7 +490,7 @@ func searchSubString(state *state, start bytes.Buffer, end bytes.Buffer, levensh
 			return nil, nil, 0, err
 		}
 	} else if state.final {
-		words = &word{content: start.String(), nextWord: words}
+		words = &word{content: start.Bytes(), nextWord: words}
 		lastWord = words
 		wordsSize = 1
 	}
