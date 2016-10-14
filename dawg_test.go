@@ -50,3 +50,20 @@ func TestUTF8(t *testing.T) {
 		t.Error("UTF-8 Failed")
 	}
 }
+
+func TestSaveDawgFile(t *testing.T) {
+	dawg := CreateDAWG([]string{"vate", "note", "vete", "vute"})
+	
+	err := dawg.SaveToFile("Test.dawg")
+	if err != nil {
+		t.Error("Saving Failed")
+	}
+}
+
+func TestCreateBigDAWGfromFile(t *testing.T) {
+	dawg, err := CreateDAWGFromFile("TestDawg.txt")
+	if err != nil {
+		t.Error("Creation From File Failed")
+	}
+	dawg.SaveToFile("Test.dawg")
+}
