@@ -5,11 +5,9 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
-	"math/rand"
 	"os"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // DAWG is used to store the representation of the Directly Acyclic Word Graph
@@ -19,7 +17,7 @@ type DAWG struct {
 }
 
 type letter struct {
-	char int // Yay ! Unicode !
+	char byte // Yay ! Unicode !
 	state *state
 
 	// Tree, allow for O(log(n)) search operations
@@ -43,7 +41,7 @@ type state struct {
 
 // Linked list of words
 type word struct {
-	content  []int
+	content  []byte
 	nextWord *word
 }
 
@@ -80,7 +78,7 @@ func (state *state) containsLetter(letter *letter) (containsLetter bool) {
 }
 
 // Get a letter from the state (in O(log(n)) time)
-func (state *state) getletter(letter rune) *letter {
+func (state *state) getletter(letter byte) *letter {
 	curLetter := state.letters
 	for curLetter != nil && curLetter.char != letter {
 		if curLetter.char < letter {
@@ -108,7 +106,7 @@ func CreateDAWGFromFile(fileName string) (dawg *DAWG, err error) {
 	var nbNodes uint64 = 1
 	maxWordSize := 0
 	for scanner.Scan() {
-		_, size, createdNodes := addWord(initialState, scanner.Text())
+		_, size, createdNodes := addWord(initialState, scanner.Bytes())
 		if size > maxWordSize {
 			maxWordSize = size
 		}
@@ -122,7 +120,7 @@ func CreateDAWGFromFile(fileName string) (dawg *DAWG, err error) {
 }
 
 // Create a new DAWG by loading the words from an array.
-func CreateDAWG(words [][]int) *DAWG {
+func CreateDAWG(words [][]byte) *DAWG {
 	initialState := &state{final: false}
 	var nbNodes uint64 = 1
 	maxWordSize := 0
@@ -200,7 +198,7 @@ func analyseSubTrie(curState *state, levels []*state, channels []chan int) (subL
 }
 
 // Add a new word to the Trie
-func addWord(initialState *state, word []int) (newEndState bool, wordSize int, createdNodes uint64) {
+func addWord(initialState *state, word []byte) (newEndState bool, wordSize int, createdNodes uint64) {
 	curState := initialState
 	for _, l := range word {
 		var curLetter *letter
@@ -245,8 +243,8 @@ func addWord(initialState *state, word []int) (newEndState bool, wordSize int, c
 // levenshteinDistance is the maximum Levenshtein distance allowed beetween word and the words found in the DAWG.
 // maxResults allow to limit the number of returned results (to reduce the time needed by the search)
 // allowAdd and allowDelete specify if the returned words can have insertions/deletions of letters
-func (dawg *DAWG) Search(word []int, levenshteinDistance int, maxResults int, allowAdd bool, allowDelete bool) (words [][]int, err error) {
-	wordsFound, _, wordsSize, err := searchSubString(dawg.initialState, new(Buffer), *bytes.NewBuffer(word), levenshteinDistance, maxResults, allowAdd, allowDelete, -1)
+func (dawg *DAWG) Search(word []byte, levenshteinDistance int, maxResults int, allowAdd bool, allowDelete bool) (words [][]byte, err error) {
+	wordsFound, _, wordsSize, err := searchSubString(dawg.initialState, *bytes.NewBuffer(nil), *bytes.NewBuffer(word), levenshteinDistance, maxResults, allowAdd, allowDelete, -1)
 	if err != nil {
 		return
 	}
@@ -255,7 +253,7 @@ func (dawg *DAWG) Search(word []int, levenshteinDistance int, maxResults int, al
 		wordsFound = wordsFound.nextWord
 	}
 	// Transform to an array of strings
-	words = make([][]int, wordsSize)
+	words = make([][]byte, wordsSize)
 	for ; wordsSize > 0; wordsSize-- {
 		words[wordsSize-1] = wordsFound.content
 		wordsFound = wordsFound.nextWord
@@ -317,7 +315,7 @@ func LoadDAWGFromFile(fileName string) (dawg *DAWG, err error) {
 
 		states[nodeNumber] = &state{final: finalNode}
 		initialState = states[nodeNumber]
-		var char int = 0
+		var char byte = 0
 		for i, str := range fields[2:] {
 			if i%2 == 0 {
 				// It seems that char, _, _, err = strconv.UnquoteChar(str, 0) doesn't work, so we have to use Unquote before UnquoteChar
@@ -326,10 +324,8 @@ func LoadDAWGFromFile(fileName string) (dawg *DAWG, err error) {
 				if err != nil {
 					return
 				}
-				char, err = strconv.Atoi(unquoted)
-				if err != nil {
-					return
-				}
+				tmp, _ := strconv.Atoi(unquoted)
+				char = byte(tmp)
 			} else {
 				var linkedNodeNumber uint64
 				linkedNodeNumber, err = strconv.ParseUint(str, 10, 64)
@@ -414,7 +410,7 @@ func saveSubTrieToFile(file *os.File, curState *state, nodeNumber *uint64) (err 
 			if _, err = file.WriteString(" "); err != nil {
 				return
 			}
-			if _, err = file.WriteString(strconv.Quote(strconv.Itoa(curLetter.char))); err != nil {
+			if _, err = file.WriteString(strconv.Quote(strconv.Itoa(int(curLetter.char)))); err != nil {
 				return
 			}
 			if _, err = file.WriteString(" "); err != nil {
@@ -431,10 +427,10 @@ func saveSubTrieToFile(file *os.File, curState *state, nodeNumber *uint64) (err 
 	return
 }
 
-func searchSubString(state *state, start bytes.Buffer, end bytes.Buffer, levenshteinDistance int, maxResults int, allowAdd bool, allowDelete bool, ignoreChar int) (words *word, lastWord *word, wordsSize int, er error) {
-	var char int
+func searchSubString(state *state, start bytes.Buffer, end bytes.Buffer, levenshteinDistance int, maxResults int, allowAdd bool, allowDelete bool, ignoreChar byte) (words *word, lastWord *word, wordsSize int, er error) {
+	var char byte
 	if end.Len() > 0 {
-		char, er = end.ReadSlice()
+		char, er = end.ReadByte()
 		if er != nil {
 			return
 		}
@@ -486,7 +482,7 @@ func searchSubString(state *state, start bytes.Buffer, end bytes.Buffer, levensh
 			}
 		}
 
-		if err := end.UnreadRune(); err != nil { // Revert the ReadRune
+		if err := end.Unread(); err != nil { // Revert the ReadRune
 			return nil, nil, 0, err
 		}
 	} else if state.final {
